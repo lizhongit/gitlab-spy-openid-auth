@@ -101,9 +101,10 @@ fn internal_error() -> HttpResponse {
     .body("Internal Service  Error")
 }
 
-async fn stage1(info: web::Query<QueryInfo>) -> HttpResponse {
+async fn stage1(info: web::Query<QueryInfo>, conf: web::Data<config::Config>) -> HttpResponse {
   let uri = format!(
-    "https://git.uinnova.com/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&state={state}",
+    "{gitlab_url}/oauth/authorize?response_type=code&client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&state={state}",
+    gitlab_url = conf.gitlab_url,
     client_id = info.client_id,
     redirect_uri = info.redirect_uri,
     scope = info.scope,
