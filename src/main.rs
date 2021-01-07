@@ -5,6 +5,7 @@ use log::{error};
 use std::error;
 use base64_url;
 use std::str::from_utf8;
+use std::process;
 use hmac::{Hmac, Mac, NewMac};
 use sha2::Sha256;
 
@@ -114,8 +115,8 @@ async fn stage1(info: web::Query<QueryInfo>) -> HttpResponse {
     .finish()
 }
 
-async fn stage2(info: web::Json<PostInfo>) -> HttpResponse {
-  let uri = "https://git.uinnova.com/oauth/token";
+async fn stage2(info: web::Json<PostInfo>, conf: web::Data<config::Config>) -> HttpResponse {
+  let uri = format!("{}/oauth/token", conf.gitlab_url);
 
   let client = reqwest::Client::new();
 
@@ -126,7 +127,7 @@ async fn stage2(info: web::Json<PostInfo>) -> HttpResponse {
   params.insert("code", info.code.to_owned());
   params.insert("redirect_uri", info.redirect_uri.to_owned());
 
-  let resp = match client.post(uri).json(&params).send().await {
+  let resp = match client.post(&uri).json(&params).send().await {
     Ok(res) => res,
     Err(e) =>  {
       error!("ERROR: {}", e);
@@ -160,7 +161,7 @@ async fn stage2(info: web::Json<PostInfo>) -> HttpResponse {
       }
     };
   
-    let new_id_token = match jwt_inject(id_token.to_string()) {
+    let new_id_token = match jwt_inject(id_token.to_string(), conf) {
       Ok(t) => t,
       Err(e) => {
         error!("ERROR: {}", e);
@@ -184,9 +185,11 @@ async fn stage2(info: web::Json<PostInfo>) -> HttpResponse {
   }
 }
 
-async fn stage3(info: web::Query<QueryUser>) -> HttpResponse {
+async fn stage3(info: web::Query<QueryUser>, conf: web::Data<config::Config>) -> HttpResponse {
+
   let uri = format!(
-    "https://git.uinnova.com/oauth/userinfo?access_token={access_token}",
+    "{gitlab_url}/oauth/userinfo?access_token={access_token}",
+    gitlab_url = conf.gitlab_url,
     access_token = info.access_token,
   );
 
@@ -239,8 +242,19 @@ async fn stage3(info: web::Query<QueryUser>) -> HttpResponse {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
   env_logger::init();
-  HttpServer::new(|| {
-    App::new().service(
+
+  let conf: config::Config = config::Config::new(String::from("./config.yaml")).unwrap_or_else(|err|{
+    error!("Problem parsing arguments: {}", err);
+    process::exit(1);
+  });
+
+  HttpServer::new(move || {
+    App::new()
+      .data(config::Config {
+        gitlab_url: conf.gitlab_url.to_owned(),
+        iss_url: conf.iss_url.to_owned(),
+      })
+      .service(
       web::scope("/oauth")
       .route("/authorize", web::get().to(stage1))
       .route("/token", web::post().to(stage2))
@@ -252,7 +266,7 @@ async fn main() -> std::io::Result<()> {
   .await
 }
 
-fn jwt_inject(id_token: String) -> Result<String> {
+fn jwt_inject(id_token: String, conf: web::Data<config::Config>) -> Result<String> {
   let split: Vec<&str> = id_token.split(".").collect();
   let claims_json = base64_url::decode(split[1])?;
 
@@ -261,7 +275,7 @@ fn jwt_inject(id_token: String) -> Result<String> {
   let email_split:Vec<&str> = claims.email.split("@").collect();
 
   let new_claims = NewClaims {
-    iss: "https://auth.udolphin.com".to_string(),
+    iss: conf.iss_url.to_owned(),
     sub: email_split[0].to_owned(),
     aud: claims.aud, 
     exp: claims.exp, 
