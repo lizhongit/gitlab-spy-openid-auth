@@ -1,4 +1,4 @@
-# A OpenID Connect Spy for Gitlab
+# An OpenID Connect Spy for Gitlab
 
 If you want to modify some data of Gitlab OpenID Connect result like add new fields or change some value.
 
